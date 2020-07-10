@@ -104,7 +104,8 @@ function createLoaderPipeline (options, assets) {
             });
 
             return { 
-                code: csstree.generate(ast) 
+                code: csstree.generate(ast),
+                map,
             };
         });
     }
@@ -118,6 +119,7 @@ const SIDE_EFFECT_CODE_REPLACEMENT = 'false';
 
 module.exports = function (options) {
     let files = {};
+    let sourceMap;
     let assets = {};
     let output = '';
 
@@ -143,6 +145,7 @@ module.exports = function (options) {
             }
 
             files[id] = input.code;
+            sourceMap = input.map;
 
             if (opts.hot) {
                 return getHotModuleCode();
@@ -155,6 +158,7 @@ module.exports = function (options) {
             // To bypass this, a side effect is created and replaced before finalising.
             return {
                 code: SIDE_EFFECT_CODE,
+                map: input.map,
                 moduleSideEffects: true
             };
         },
@@ -171,7 +175,10 @@ module.exports = function (options) {
             });
 
             if (!opts.hot) {
-                return code.replace(SIDE_EFFECT_CODE_REGEX, SIDE_EFFECT_CODE_REPLACEMENT);
+                return {
+                    code: code.replace(SIDE_EFFECT_CODE_REGEX, SIDE_EFFECT_CODE_REPLACEMENT),
+                    map: sourceMap
+                }
             }
         },
 
@@ -190,9 +197,30 @@ module.exports = function (options) {
             // TODO: Check for extract mode, loader mode and inline mode
             let css_ref = this.emitFile({
                 type: 'asset',
+                // TODO: fix sourceMappingURL=to.css.map
+                // However source map file is built on css file which is available only after this.emit
                 source: output,
-                name: opts.file
+                name: opts.file,
+                fileName: undefined,
             });
+
+            if (sourceMap) {
+                const cssFile = Object.values(bundle).find(chunk => chunk.name === opts.file)
+
+                const sourceMapObject = sourceMap === 'string'
+                    ? JSON.parse(sourceMap)
+                    : sourceMap
+
+                // Overwrite to property
+                sourceMapObject.to = path.basename(cssFile.fileName)
+
+                this.emitFile({
+                    type: 'asset',
+                    // Replace "file":"to.css" by asset base name
+                    source: JSON.stringify(sourceMapObject),
+                    fileName: cssFile.fileName + '.map'
+                })
+            }
 
             Object.keys(bundle).forEach(fileName => {
                 if (bundle[fileName].isEntry && opts.hot) {
